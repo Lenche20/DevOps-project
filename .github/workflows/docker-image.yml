@@ -1,0 +1,60 @@
+name: Deploy to minikube
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    
+    - uses: actions/checkout@v2
+
+    - name: Install minikube
+      run: | 
+        apt update -y
+        apt upgrade -y
+        apt install -y curl wget apt-transport-https
+        wget https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+        cp minikube-linux-amd64 /usr/local/bin/minikube
+        chmod +x /usr/local/bin/minikube
+        echo "Installed minikube version: $(minikube version)"
+
+    - name: Deploy server to minikube cluster
+      run: |
+        minikube start
+        eval $(minikube docker-env)
+        cd server
+        docker build -t server .
+        cd deploy
+        helm upgrade server charts/ --wait --install 
+        export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=server,app.kubernetes.io/instance=server" -o jsonpath="{.items[0].metadata.name}")
+        kubectl --namespace default port-forward $POD_NAME 3001:3001 &
+        sleep 10
+        curl -s 127.0.0.1:3001
+        exit 0
+
+    - name: Deploy client to minikube cluster
+      run: |
+        minikube start
+        eval $(minikube docker-env)
+        cd client
+        docker build -t client .
+        cd deploy
+        helm upgrade client charts/ --wait --install 
+        export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=client,app.kubernetes.io/instance=client" -o jsonpath="{.items[0].metadata.name}")
+        kubectl --namespace default port-forward $POD_NAME 3000:3000 &
+        sleep 10
+        curl -s 127.0.0.1:3000
+        exit 0
+
+    - name: Deploy prometheus to minikube cluster
+      run: |
+        minikube start
+        helm repo add bitnami https://charts.bitnami.com/bitnami
+        helm install prometheus bitnami/kube-prometheus
+
